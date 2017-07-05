@@ -34,9 +34,12 @@
 		<param name="/mcl_3dl/num_particles" value="256" />
 		<param name="/mcl_3dl/resample_var_x" value="0.2" />
 		<param name="/mcl_3dl/resample_var_y" value="0.2" />
-		<param name="/mcl_3dl/resample_var_z" value="0.1" />
+		<param name="/mcl_3dl/resample_var_z" value="0.2" />
 		<param name="/mcl_3dl/match_dist_min" value="0.8" />
-		<param name="/mcl_3dl/lpf_step" value="8.0" />
+		<param name="/mcl_3dl/bias_var_dist" value="2.0" />
+		<param name="/mcl_3dl/bias_var_ang" value="1.57" />
+		<param name="/mcl_3dl/accum_cloud" value="1" />
+		<param name="/mcl_3dl/lpf_step" value="0.1" />
 	</group>
 
 	<node pkg="rviz" type="rviz" name="rviz" args="-d $(find mcl_3dl)/launch/mcl_3dl.rviz" />

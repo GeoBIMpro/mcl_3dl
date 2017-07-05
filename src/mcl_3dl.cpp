@@ -104,6 +104,8 @@ private:
     double clip_beam_far_sq;
     double clip_beam_z_min;
     double clip_beam_z_max;
+    double map_clip_far;
+    double map_clip_far_sq;
     double map_clip_z_min;
     double map_clip_z_max;
     double map_downsample_x;
@@ -891,7 +893,7 @@ private:
 
     e.rot = map_rot * odom.rot;
     e.pos = map_pos + e.rot * odom.rot.inv() * odom.pos;
-
+    
     assert(std::isfinite(e.pos.x));
     assert(std::isfinite(e.pos.y));
     assert(std::isfinite(e.pos.z));
@@ -1038,8 +1040,6 @@ private:
              params.resample_var_yaw)));
 
     const auto tnow = boost::chrono::high_resolution_clock::now();
-    ROS_INFO("MCL (%0.3f sec.)",
-             boost::chrono::duration<float>(tnow - ts).count());
     pc_local_accum.reset(new pcl::PointCloud<pcl::PointXYZI>);
     pc_accum_header.clear();
 
@@ -1049,6 +1049,10 @@ private:
       dt = 1.0;
     tf_tolerance_base = ros::Duration(localize_rate->in(dt));
     localized_last = localized_current;
+
+    ROS_DEBUG("MCL process %0.3f sec. interval %0.3f sec.",
+             boost::chrono::duration<float>(tnow - ts).count(),
+             localize_rate->get());
   }
   ros::Time imu_last;
   void cb_imu(const sensor_msgs::Imu::ConstPtr &msg)
@@ -1126,16 +1130,18 @@ public:
     nh.param("clip_far", params.clip_far, 10.0);
     params.clip_near_sq = pow(params.clip_near, 2.0);
     params.clip_far_sq = pow(params.clip_far, 2.0);
-    nh.param("clip_z_min", params.clip_z_min, -2.0);
-    nh.param("clip_z_max", params.clip_z_max, 2.0);
+    nh.param("clip_z_min", params.clip_z_min, -4.0);
+    nh.param("clip_z_max", params.clip_z_max, 4.0);
     nh.param("clip_beam_near", params.clip_beam_near, 0.5);
     nh.param("clip_beam_far", params.clip_beam_far, 4.0);
     params.clip_beam_near_sq = pow(params.clip_beam_near, 2.0);
     params.clip_beam_far_sq = pow(params.clip_beam_far, 2.0);
     nh.param("clip_beam_z_min", params.clip_beam_z_min, -2.0);
     nh.param("clip_beam_z_max", params.clip_beam_z_max, 2.0);
-    nh.param("map_clip_z_min", params.map_clip_z_min, -3.0);
-    nh.param("map_clip_z_max", params.map_clip_z_max, 3.0);
+    nh.param("map_clip_far", params.map_clip_far, 12.0);
+    params.map_clip_far_sq = pow(params.map_clip_far, 2.0);
+    nh.param("map_clip_z_min", params.map_clip_z_min, -5.0);
+    nh.param("map_clip_z_max", params.map_clip_z_max, 5.0);
     nh.param("map_downsample_x", params.map_downsample_x, 0.1);
     nh.param("map_downsample_y", params.map_downsample_y, 0.1);
     nh.param("map_downsample_z", params.map_downsample_z, 0.1);
@@ -1158,7 +1164,7 @@ public:
     float weight_f[4];
     nh.param("dist_weight_x", weight[0], 1.0);
     nh.param("dist_weight_y", weight[1], 1.0);
-    nh.param("dist_weight_z", weight[2], 5.0);
+    nh.param("dist_weight_z", weight[2], 3.0);
     for (size_t i = 0; i < 3; i++)
       weight_f[i] = weight[i];
     weight_f[3] = 0.0;
@@ -1212,7 +1218,7 @@ public:
             vec3(v_roll, v_pitch, v_yaw)));
 
     double lpf_step;
-    nh.param("lpf_step", lpf_step, 16.0);
+    nh.param("lpf_step", lpf_step, 6.0);
     f_pos[0].reset(new filter(filter::FILTER_LPF, lpf_step, 0.0));
     f_pos[1].reset(new filter(filter::FILTER_LPF, lpf_step, 0.0));
     f_pos[2].reset(new filter(filter::FILTER_LPF, lpf_step, 0.0));
@@ -1220,7 +1226,7 @@ public:
     f_ang[1].reset(new filter(filter::FILTER_LPF, lpf_step, 0.0, true));
     f_ang[2].reset(new filter(filter::FILTER_LPF, lpf_step, 0.0, true));
 
-    nh.param("acc_lpf_step", lpf_step, 128.0);
+    nh.param("acc_lpf_step", lpf_step, 64.0);
     f_acc[0].reset(new filter(filter::FILTER_LPF, lpf_step, 0.0));
     f_acc[1].reset(new filter(filter::FILTER_LPF, lpf_step, 0.0));
     f_acc[2].reset(new filter(filter::FILTER_LPF, lpf_step, 0.0));
@@ -1230,8 +1236,8 @@ public:
     nh.param("jump_ang", params.jump_ang, 1.57);
     nh.param("fix_dist", params.fix_dist, 0.2);
     nh.param("fix_ang", params.fix_ang, 0.1);
-    nh.param("bias_var_dist", params.bias_var_dist, 2.0);
-    nh.param("bias_var_ang", params.bias_var_ang, 1.57);
+    nh.param("bias_var_dist", params.bias_var_dist, 0.8);
+    nh.param("bias_var_ang", params.bias_var_ang, 0.785);
 
     nh.param("skip_measure", params.skip_measure, 1);
     cnt_measure = 0;
@@ -1285,6 +1291,8 @@ public:
             if (p.z - e.pos.z > params.map_clip_z_max)
               return true;
             if (p.z - e.pos.z < params.map_clip_z_min)
+              return true;
+            if (powf(p.x - e.pos.x, 2.0) + powf(p.y - e.pos.y, 2.0) > params.map_clip_far_sq)
               return true;
             return false;
           };
